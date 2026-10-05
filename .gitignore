@@ -1,0 +1,14 @@
+node_modules
+.npm-cache
+.electron-cache
+.electron-builder-cache
+dist
+release
+tools
+.DS_Store
+*.local
+*.log
+*.conf.lock
+work/
+outputs/videos/
+data/
