@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'release', '.npm-cache', '.electron-cache', '.electron-builder-cache', 'data', 'work', 'outputs'] },
+  { ignores: ['dist', 'release', '.npm-cache', '.electron-cache', '.electron-builder-cache', 'data', 'work', 'outputs', 'android'] },
   {
     ...js.configs.recommended,
     files: ['server/**/*.js', 'desktop/**/*.js', 'scripts/**/*.js'],

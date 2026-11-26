@@ -9,6 +9,7 @@ import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promis
 import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import { networkInterfaces } from 'node:os'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dataDir = resolve(process.env.MULTIPLICA_DATA_DIR || join(rootDir, 'data'))
@@ -17,9 +18,28 @@ const workDir = resolve(process.env.MULTIPLICA_WORK_DIR || join(rootDir, 'work',
 const uploadDir = join(workDir, 'uploads')
 const outputDir = resolve(process.env.MULTIPLICA_OUTPUT_DIR || join(rootDir, 'outputs', 'videos'))
 const frontendDir = resolve(process.env.MULTIPLICA_FRONTEND_DIR || join(rootDir, 'dist'))
-const ffmpegPath = ffmpegStaticPath?.replace('app.asar', 'app.asar.unpacked')
-const ffprobePath = ffprobe.path.replace('app.asar', 'app.asar.unpacked')
+// MULTIPLICA_FFMPEG e MULTIPLICA_FFPROBE trocam o FFmpeg embutido por outro. No Linux, o embutido não tem o filtro de texto (drawtext).
+const ffmpegPath = process.env.MULTIPLICA_FFMPEG || ffmpegStaticPath?.replace('app.asar', 'app.asar.unpacked')
+const ffprobePath = process.env.MULTIPLICA_FFPROBE || ffprobe.path.replace('app.asar', 'app.asar.unpacked')
 const port = Number(process.env.PORT || 3001)
+// 127.0.0.1 deixa o servidor acessível só neste computador. Use 0.0.0.0 para o app Android alcançá-lo pela rede Wi-Fi.
+const host = process.env.MULTIPLICA_HOST || (process.argv.includes('--lan') ? '0.0.0.0' : '127.0.0.1')
+// Origens das telas do app Android (Capacitor) e do Vite. Outras podem ser somadas em MULTIPLICA_ALLOWED_ORIGINS, separadas por vírgula.
+const allowedOrigins = new Set([
+  'http://localhost',
+  'https://localhost',
+  'capacitor://localhost',
+  ...(process.env.MULTIPLICA_ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean),
+])
+const fontCandidates = [
+  process.env.MULTIPLICA_FONT,
+  join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'arialbd.ttf'),
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+  '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+  '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+].filter(Boolean)
+const fontFile = fontCandidates.find((candidate) => existsSync(candidate)) || fontCandidates[0]
 const jobs = new Map()
 
 await Promise.all([
@@ -82,6 +102,17 @@ const upload = multer({
 })
 
 const app = express()
+app.use((request, response, next) => {
+  const origin = request.headers.origin
+  if (origin && allowedOrigins.has(origin)) {
+    response.setHeader('Access-Control-Allow-Origin', origin)
+    response.setHeader('Vary', 'Origin')
+    response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS')
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    if (request.method === 'OPTIONS') return response.sendStatus(204)
+  }
+  next()
+})
 app.use(express.json())
 app.use('/api/files', express.static(outputDir, { fallthrough: false }))
 
@@ -205,7 +236,7 @@ function normalizeVisualStyle(input) {
 
 async function applyVisualStyle(input, output, style, jobDir) {
   const filters = []
-  const fontPath = filterPath(join(process.env.WINDIR || 'C:\\Windows', 'Fonts', 'arialbd.ttf'))
+  const fontPath = filterPath(fontFile)
   const color = `0x${style.accentColor.slice(1)}`
   const backgroundColor = `0x${style.backgroundColor.slice(1)}@${(style.backgroundOpacity / 100).toFixed(2)}`
   const headlineY = style.position === 'center' ? '(h-text_h)/2' : style.position === 'bottom' ? 'h-text_h-h*0.14' : 'h*0.10'
@@ -575,10 +606,16 @@ app.use((error, _request, response, _next) => {
 
 export function startServer(preferredPort = port) {
   return new Promise((resolvePromise, reject) => {
-    const server = app.listen(preferredPort, '127.0.0.1', () => {
+    const server = app.listen(preferredPort, host, () => {
       const address = server.address()
       const activePort = typeof address === 'object' && address ? address.port : preferredPort
       console.log(`Multiplica pronto em http://127.0.0.1:${activePort}`)
+      if (host === '0.0.0.0') {
+        const lanAddresses = Object.values(networkInterfaces()).flat()
+          .filter((item) => item && item.family === 'IPv4' && !item.internal)
+          .map((item) => `http://${item.address}:${activePort}`)
+        for (const address of lanAddresses) console.log(`Na rede local (app Android): ${address}`)
+      }
       resolvePromise(server)
     })
     server.on('error', reject)

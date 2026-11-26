@@ -1,5 +1,6 @@
 import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Check, ChevronDown, Download, Film, FolderPlus, History, LayoutGrid, LoaderCircle, Menu, Palette, Play, Plus, RotateCcw, Scissors, Search, Sparkles, Trash2, Type, Video, X } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Download, Film, FolderPlus, History, LayoutGrid, LoaderCircle, Menu, Palette, Play, Plus, RotateCcw, Scissors, Search, Server, Sparkles, Trash2, Type, Video, X } from 'lucide-react'
+import { apiUrl, getServerUrl, isNativeApp, setServerUrl } from './api'
 
 type ClipType = 'hook' | 'body' | 'cta'
 type Clip = { id: string; name: string; type: ClipType; duration: number; trimStart: number; trimEnd: number; size: number; url: string; createdAt: string }
@@ -90,6 +91,9 @@ function App() {
   const [visualStyle, setVisualStyle] = useState<VisualStyle>({ enabled: false, headline: '', brandName: '', accentColor: '#D8F45C', backgroundColor: '#193F35', backgroundOpacity: 88, position: 'top' })
   const [job, setJob] = useState<RenderJob | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [isServerSetupOpen, setIsServerSetupOpen] = useState(false)
+  const [serverDraft, setServerDraft] = useState(getServerUrl)
   const inputRef = useRef<HTMLInputElement>(null)
   const fullVideoInputRef = useRef<HTMLInputElement>(null)
   const editorVideoRef = useRef<HTMLVideoElement>(null)
@@ -107,8 +111,20 @@ function App() {
   const isProcessing = Boolean(job && !['done', 'error'].includes(job.status))
 
   async function request<T>(url: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(url, options)
-    const payload = response.status === 204 ? null : await response.json()
+    let response: Response
+    try {
+      response = await fetch(apiUrl(url), options)
+    } catch {
+      throw new Error(isNativeApp ? 'Não foi possível falar com o servidor do Multiplica. Confira o endereço e se o computador está na mesma rede Wi-Fi.' : 'Não foi possível falar com o servidor do Multiplica.')
+    }
+    let payload = null
+    if (response.status !== 204) {
+      try {
+        payload = await response.json()
+      } catch {
+        throw new Error(isNativeApp ? 'Este endereço não respondeu como um servidor do Multiplica. Confira o endereço e a porta.' : 'O servidor do Multiplica respondeu de forma inesperada.')
+      }
+    }
     if (!response.ok) throw new Error(payload?.error || 'Não foi possível concluir a operação.')
     return payload as T
   }
@@ -120,8 +136,13 @@ function App() {
       const savedId = preferredId || localStorage.getItem('multiplica-active-project')
       const selected = list.find((item) => item.id === savedId) || list[0]
       if (selected) await loadProject(selected.id)
+      setConnectionError(null)
+      setToast(null)
+      return true
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Não foi possível carregar os projetos.')
+      const message = error instanceof Error ? error.message : 'Não foi possível carregar os projetos.'
+      setConnectionError(message)
+      return false
     } finally {
       setIsLoading(false)
     }
@@ -370,6 +391,31 @@ function App() {
     openView('studio')
   }
 
+  async function connectToServer() {
+    setServerUrl(serverDraft)
+    setServerDraft(getServerUrl())
+    setIsLoading(true)
+    setIsServerSetupOpen(false)
+    if (!(await loadProjects())) setIsServerSetupOpen(true)
+  }
+
+  if (isServerSetupOpen || (!isLoading && !project && connectionError)) {
+    return <div className="server-setup">
+      <form className="server-card" onSubmit={(event) => { event.preventDefault(); void connectToServer() }}>
+        <span className="brand-mark"><Play size={15} fill="currentColor" /></span>
+        <h1>Conectar ao servidor</h1>
+        <p>{isNativeApp ? 'Os vídeos são montados no computador ou servidor onde o Multiplica está rodando. Informe o endereço que aparece ao iniciá-lo.' : 'Informe o endereço do servidor do Multiplica. Deixe vazio para usar o deste endereço.'}</p>
+        <label htmlFor="server-url">Endereço do servidor</label>
+        <input id="server-url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="http://192.168.0.10:3001" value={serverDraft} onChange={(event) => setServerDraft(event.target.value)} />
+        {connectionError && <p className="server-error" role="alert">{connectionError}</p>}
+        <div className="server-actions">
+          {isServerSetupOpen && project && <button type="button" className="secondary-button" onClick={() => { setServerDraft(getServerUrl()); setIsServerSetupOpen(false) }}>Cancelar</button>}
+          <button type="submit" className="primary-button"><Server size={17} /> Conectar</button>
+        </div>
+      </form>
+    </div>
+  }
+
   if (isLoading || !project) {
     return <div className="loading-screen"><span className="brand-mark"><Play size={15} fill="currentColor" /></span><LoaderCircle className="spin" size={22} /><p>Carregando seus projetos…</p></div>
   }
@@ -379,7 +425,7 @@ function App() {
       <header className="topbar">
         <button className="brand" onClick={() => openView('studio')} aria-label="Multiplica — início"><span className="brand-mark"><Play size={15} fill="currentColor" /></span><span>multiplica</span></button>
         <nav className="main-nav" aria-label="Navegação principal">{([['studio', 'Estúdio'], ['projects', 'Projetos'], ['exports', 'Exportações']] as [AppView, string][]).map(([view, label]) => <button key={view} className={activeView === view ? 'active' : ''} onClick={() => openView(view)}>{label}</button>)}</nav>
-        <div className="top-actions"><button className="icon-button" aria-label="Pesquisar"><Search size={19} /></button><button className="avatar" aria-label="Abrir perfil">WM</button><button className="mobile-menu" aria-label="Abrir menu" aria-expanded={isMobileMenuOpen} onClick={() => setIsMobileMenuOpen((current) => !current)}><Menu size={21} /></button></div>
+        <div className="top-actions">{isNativeApp && <button className="icon-button" aria-label="Trocar servidor" title="Trocar servidor" onClick={() => setIsServerSetupOpen(true)}><Server size={19} /></button>}<button className="icon-button" aria-label="Pesquisar"><Search size={19} /></button><button className="avatar" aria-label="Abrir perfil">WM</button><button className="mobile-menu" aria-label="Abrir menu" aria-expanded={isMobileMenuOpen} onClick={() => setIsMobileMenuOpen((current) => !current)}><Menu size={21} /></button></div>
         {isMobileMenuOpen && <nav className="mobile-nav" aria-label="Navegação móvel">{([['studio', 'Estúdio'], ['projects', 'Projetos'], ['exports', 'Exportações']] as [AppView, string][]).map(([view, label]) => <button key={view} className={activeView === view ? 'active' : ''} onClick={() => openView(view)}>{label}</button>)}</nav>}
       </header>
 
@@ -420,7 +466,7 @@ function App() {
               <div className="clip-list">
                 {typeClips.length === 0 && <div className="empty-clips"><Film size={21} /><span>Nenhum trecho adicionado</span></div>}
                 {typeClips.map((clip) => <div className="clip-card" key={clip.id}>
-                  <div className="clip-preview"><video src={clip.url} muted preload="metadata" /><span className="preview-play"><Play size={11} fill="currentColor" /></span></div>
+                  <div className="clip-preview"><video src={apiUrl(clip.url)} muted preload="metadata" /><span className="preview-play"><Play size={11} fill="currentColor" /></span></div>
                   <div className="clip-info"><strong>{clip.name}</strong><span>{formatDuration(clip.trimEnd - clip.trimStart)} selecionado · {formatBytes(clip.size)}</span>{(clip.trimStart > 0 || clip.trimEnd < clip.duration) && <em>Recortado</em>}</div>
                   <div className="clip-actions"><button className="clip-edit" aria-label={`Editar corte de ${clip.name}`} onClick={() => openClipEditor(clip)} title="Editar corte"><Scissors size={15} /></button><button className="clip-menu" aria-label={`Remover ${clip.name}`} onClick={() => void removeClip(clip)} title="Remover"><Trash2 size={15} /></button></div>
                 </div>)}
@@ -456,7 +502,7 @@ function App() {
 
         {combinations.length > 0 && <section className={`visual-style-section ${visualStyle.enabled ? 'is-enabled' : ''}`} aria-labelledby="visual-style-title">
           <div className="style-preview">
-            <video src={(selectedCombinations[0] || combinations[0]).hook.url} muted autoPlay loop playsInline />
+            <video src={apiUrl((selectedCombinations[0] || combinations[0]).hook.url)} muted autoPlay loop playsInline />
             <div className="preview-shade" />
             {visualStyle.headline && <strong className={`preview-headline position-${visualStyle.position}`} style={{ color: visualStyle.accentColor, background: hexToRgba(visualStyle.backgroundColor, visualStyle.backgroundOpacity) }}>{visualStyle.headline}</strong>}
             {visualStyle.brandName && <span className="preview-brand">{visualStyle.brandName}</span>}
@@ -482,7 +528,7 @@ function App() {
             <p>{job ? job.message : selectedCombinations.length ? `${selectedCombinations.length} combinação${selectedCombinations.length === 1 ? '' : 'ões'} pronta${selectedCombinations.length === 1 ? '' : 's'} para gerar.` : 'Selecione as combinações que deseja produzir.'}</p>
             {isProcessing && <div className="progress-track"><span style={{ width: `${job?.progress || 0}%` }} /></div>}
           </div></div>
-          {job?.status === 'done' && job.zipUrl ? <a className="primary-button" href={job.zipUrl} download><Download size={18} /> Baixar pacote ZIP</a> : <button className="primary-button" onClick={() => void generateVideos()} disabled={isProcessing || !selectedCombinations.length}>{isProcessing ? `${job?.progress || 0}%` : `Gerar ${selectedCombinations.length} vídeo${selectedCombinations.length === 1 ? '' : 's'}`} <ArrowRight size={18} /></button>}
+          {job?.status === 'done' && job.zipUrl ? <a className="primary-button" href={apiUrl(job.zipUrl)} download><Download size={18} /> Baixar pacote ZIP</a> : <button className="primary-button" onClick={() => void generateVideos()} disabled={isProcessing || !selectedCombinations.length}>{isProcessing ? `${job?.progress || 0}%` : `Gerar ${selectedCombinations.length} vídeo${selectedCombinations.length === 1 ? '' : 's'}`} <ArrowRight size={18} /></button>}
         </section>
 
         {job?.status === 'error' && <div className="error-box"><strong>O processamento foi interrompido.</strong><span>{job.message}</span></div>}
@@ -495,8 +541,8 @@ function App() {
         {job?.status === 'done' && <section className="results" id="exports">
           <div className="results-title"><div><p className="section-kicker">Prévia do lote</p><h2>Combinações geradas</h2></div><span>{job.files.length} {job.files.length === 1 ? 'variação' : 'variações'}</span></div>
           <div className="result-grid">{job.files.slice(0, 12).map((file, index) => <div className="result-card" key={file.name}>
-            <video className="result-video" src={file.url} controls preload="metadata" />
-            <div className="result-meta"><div><strong>Variação {String(index + 1).padStart(2, '0')}</strong><p>{file.name}</p></div><a href={file.url} download aria-label={`Baixar ${file.name}`}><Download size={15} /></a></div>
+            <video className="result-video" src={apiUrl(file.url)} controls preload="metadata" />
+            <div className="result-meta"><div><strong>Variação {String(index + 1).padStart(2, '0')}</strong><p>{file.name}</p></div><a href={apiUrl(file.url)} download aria-label={`Baixar ${file.name}`}><Download size={15} /></a></div>
           </div>)}</div>
           {job.files.length > 12 && <p className="result-note">As demais {job.files.length - 12} variações estão no pacote ZIP.</p>}
         </section>}
@@ -510,9 +556,9 @@ function App() {
         {activeView === 'exports' && <section className="page-view">
           <div className="page-view-heading"><div><p className="section-kicker">Arquivos produzidos</p><h1>Exportações</h1><p>Consulte, visualize e baixe os lotes do projeto selecionado.</p></div><label className="view-project-select"><span>Projeto</span><select value={project.id} onChange={(event) => void loadProject(event.target.value)}>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>
           {project.exports.length === 0 ? <div className="empty-view"><History size={28} /><h2>Nenhuma exportação neste projeto</h2><p>Gere suas primeiras combinações no Estúdio.</p><button className="secondary-button" onClick={() => openView('studio')}>Ir para o Estúdio</button></div> : <>
-            <div className="export-dashboard"><div><p className="section-kicker">Histórico</p><h2>{project.exports.length} {project.exports.length === 1 ? 'lote salvo' : 'lotes salvos'}</h2></div>{job?.status === 'done' && job.zipUrl && <a className="primary-button" href={job.zipUrl} download><Download size={17} /> Baixar lote selecionado</a>}</div>
+            <div className="export-dashboard"><div><p className="section-kicker">Histórico</p><h2>{project.exports.length} {project.exports.length === 1 ? 'lote salvo' : 'lotes salvos'}</h2></div>{job?.status === 'done' && job.zipUrl && <a className="primary-button" href={apiUrl(job.zipUrl)} download><Download size={17} /> Baixar lote selecionado</a>}</div>
             <div className="history-list export-history">{project.exports.map((item, index) => <button key={item.id} className={job?.id === item.id ? 'active' : ''} onClick={() => setJob(exportAsJob(item))}><span className="history-icon"><History size={17} /></span><span><strong>{item.name || `Exportação ${project.exports.length - index}`}</strong><small>{formatDate(item.createdAt)} · {item.total} vídeo{item.total === 1 ? '' : 's'}</small></span><Download size={16} /></button>)}</div>
-            {job?.status === 'done' && <div className="export-preview"><div className="results-title"><div><p className="section-kicker">Lote selecionado</p><h2>Vídeos gerados</h2></div><span>{job.files.length} {job.files.length === 1 ? 'vídeo' : 'vídeos'}</span></div><div className="result-grid">{job.files.slice(0, 12).map((file, index) => <div className="result-card" key={file.name}><video className="result-video" src={file.url} controls preload="metadata" /><div className="result-meta"><div><strong>Variação {String(index + 1).padStart(2, '0')}</strong><p>{file.name}</p></div><a href={file.url} download aria-label={`Baixar ${file.name}`}><Download size={15} /></a></div></div>)}</div></div>}
+            {job?.status === 'done' && <div className="export-preview"><div className="results-title"><div><p className="section-kicker">Lote selecionado</p><h2>Vídeos gerados</h2></div><span>{job.files.length} {job.files.length === 1 ? 'vídeo' : 'vídeos'}</span></div><div className="result-grid">{job.files.slice(0, 12).map((file, index) => <div className="result-card" key={file.name}><video className="result-video" src={apiUrl(file.url)} controls preload="metadata" /><div className="result-meta"><div><strong>Variação {String(index + 1).padStart(2, '0')}</strong><p>{file.name}</p></div><a href={apiUrl(file.url)} download aria-label={`Baixar ${file.name}`}><Download size={15} /></a></div></div>)}</div></div>}
           </>}
         </section>}
       </main>
@@ -521,7 +567,7 @@ function App() {
         <section className="trim-modal" role="dialog" aria-modal="true" aria-labelledby="trim-title">
           <header><div><p className="section-kicker">Editor de trecho</p><h2 id="trim-title">Ajustar corte</h2></div><button aria-label="Fechar editor" onClick={() => setEditingClip(null)}><X size={20} /></button></header>
           <div className="trim-content">
-            <div className="trim-preview"><video ref={editorVideoRef} src={editingClip.url} controls preload="metadata" /></div>
+            <div className="trim-preview"><video ref={editorVideoRef} src={apiUrl(editingClip.url)} controls preload="metadata" /></div>
             <div className="trim-controls">
               <div className="trim-file"><span>{clipLabels[editingClip.type].short}</span><strong>{editingClip.name}</strong><small>Duração original: {formatDuration(editingClip.duration)}</small></div>
               <div className="trim-summary"><div><span>Início</span><strong>{trimStart.toFixed(1).replace('.', ',')} s</strong></div><i /><div><span>Fim</span><strong>{trimEnd.toFixed(1).replace('.', ',')} s</strong></div><div className="selection-time"><span>Trecho final</span><strong>{(trimEnd - trimStart).toFixed(1).replace('.', ',')} s</strong></div></div>

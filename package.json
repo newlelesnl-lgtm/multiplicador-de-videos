@@ -9,14 +9,20 @@
     "dev": "concurrently -k -n API,WEB -c green,blue \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite --host 127.0.0.1",
     "dev:server": "node --watch-path=server server/index.js",
+    "start:lan": "node server/index.js --lan",
     "start:server": "node server/index.js",
     "build": "tsc -b && vite build",
     "desktop": "npm run build && electron .",
     "dist:win": "npm run build && node scripts/build-windows.js",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "dist:android": "npm run build && node scripts/build-android.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.3",
+    "@capacitor/core": "^8.6.3",
     "@types/archiver": "^8.0.0",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.3.0",
@@ -33,6 +39,7 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.3",
     "@eslint/js": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
